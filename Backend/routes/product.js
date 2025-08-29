@@ -8,5 +8,7 @@ router.get('/category/:category', productController.getProductsByCategory);
 router.post('/', productController.addProduct);             // Admin only
 router.patch('/:id', productController.updateProduct);      // Admin only
 router.delete('/:id', productController.deleteProduct);     // Admin only
+router.get('/:id', productController.getProductById); //fetch a single product
+
 
 module.exports = router;

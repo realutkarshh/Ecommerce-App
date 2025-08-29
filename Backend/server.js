@@ -14,11 +14,15 @@ const authRoutes = require('./routes/auth');
 const productRoutes = require('./routes/product');
 const orderRoutes = require('./routes/order');
 const feedbackRoutes = require('./routes/feedback');
+const userRouter = require('./routes/user');
+
 
 app.use('/auth', authRoutes);
 app.use('/products', productRoutes);
 app.use('/orders', orderRoutes);
 app.use('/feedback', feedbackRoutes);
+app.use('/users', userRouter);
+
 
 
 
