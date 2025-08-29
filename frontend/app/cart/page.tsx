@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import { useUser } from '@/app/context/user-context';
 import { useRouter } from 'next/navigation';
-import { placeOrder } from '@/lib/api';
+import Link from 'next/link';
 
 interface Product {
   _id: string;
@@ -28,56 +28,60 @@ export default function CartPage() {
   const router = useRouter();
   const [cartItems, setCartItems] = useState<CartItemWithProduct[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   // Fetch product details for each cart item
   useEffect(() => {
     const fetchCartItems = async () => {
-      const items = await Promise.all(
-        cart.map(async (item) => {
-          const product = await getProductById(item.productId);
-          return { ...product, quantity: item.quantity };
-        })
-      );
-      setCartItems(items);
-      setLoading(false);
+      setLoading(true);
+      setError('');
+      try {
+        const items = await Promise.all(
+          cart.map(async (item) => {
+            try {
+              const product = await getProductById(item.productId);
+              return { ...product, quantity: item.quantity };
+            } catch (err) {
+              console.error('Failed to fetch product:', item.productId, err);
+              return null;
+            }
+          })
+        );
+        setCartItems(items.filter(Boolean) as CartItemWithProduct[]);
+      } catch (err) {
+        console.error('Failed to load cart items:', err);
+        setError('Failed to load cart items. Please refresh.');
+      } finally {
+        setLoading(false);
+      }
     };
     fetchCartItems();
   }, [cart]);
 
-  const handleCheckout = async () => {
+  const handleCheckout = () => {
     if (!user?.token) {
       alert('Please log in to checkout.');
+      router.push('/login');
       return;
     }
-
-    // Prepare items for the order API
-    const orderItems = cart.map((item) => ({
-      product: item.productId,
-      quantity: item.quantity,
-    }));
-
-    // Calculate total amount
-    const totalAmount = cartItems.reduce(
-      (sum, item) => sum + item.price * item.quantity,
-      0
-    );
-
-    try {
-      await placeOrder(orderItems, totalAmount, user.token);
-      clearCart(); // Clear cart on successful order
-      router.push('/orders'); // Redirect to orders page
-    } catch (error) {
-      console.error('Checkout failed:', error);
-      alert('Checkout failed. Please try again.');
-    }
+    router.push('/checkout'); // New: Redirect to checkout page
   };
 
   if (loading) return <div className="p-8 text-center">Loading cart...</div>;
+  if (error)
+    return <div className="p-8 text-center text-red-500">{error}</div>;
+
   if (cart.length === 0)
     return (
       <div className="p-8 text-center">
         <h1 className="text-2xl font-bold mb-4">Your Cart</h1>
         <p>Your cart is empty.</p>
+        <Link
+          href="/products"
+          className="mt-4 inline-block bg-blue-500 hover:bg-blue-600 text-white py-2 px-6 rounded-md"
+        >
+          Browse Products
+        </Link>
       </div>
     );
 
@@ -139,10 +143,10 @@ export default function CartPage() {
           </div>
           <button
             onClick={handleCheckout}
-            className="bg-blue-500 hover:bg-blue-600 text-white py-2 px-6 rounded-md"
+            className="bg-blue-500 hover:bg-blue-600 text-white py-2 px-6 rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
             disabled={!user}
           >
-            Checkout
+            Proceed to Checkout
           </button>
         </div>
       </div>

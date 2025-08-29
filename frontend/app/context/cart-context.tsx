@@ -41,12 +41,15 @@ export function CartProvider({ children }: { children: ReactNode }) {
   };
 
   const updateQuantity = (productId: string, quantity: number) => {
-    setCart((prev) =>
-      prev.map((item) =>
-        item.productId === productId ? { ...item, quantity } : item
-      )
-    );
-  };
+  setCart((prev) =>
+    prev.map((item) =>
+      item.productId === productId
+        ? { ...item, quantity: Math.max(1, quantity) } // Never allow <= 0
+        : item
+    )
+  );
+};
+
 
   const clearCart = () => {
     setCart([]);
