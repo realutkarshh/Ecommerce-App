@@ -25,7 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <header className="bg-white shadow-sm">
                 <div className="container mx-auto px-4 py-4 flex justify-between items-center">
                   <Link href="/">
-                    <h1 className="font-bold text-xl cursor-pointer">🍔 Burger Pizza</h1>
+                    <h1 className="font-bold text-xl cursor-pointer">🍔FoodZA</h1>
                   </Link>
                   <nav className="flex items-center gap-4">
                     <PageNavLinks />
