@@ -22,7 +22,7 @@ export default function LoginPage() {
       const data = await login(email, password);
       localStorage.setItem('token', data.token);
       // Assuming your API returns the username in the response
-      localStorage.setItem('username', data.username);
+      localStorage.setItem('username', data.user.username);
       setUser({ username: data.username, token: data.token });
       router.push('/');
     } catch (err) {

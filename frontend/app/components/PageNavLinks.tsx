@@ -18,7 +18,7 @@ export default function PageNavLinks() {
   if (user) {
     return (
       <div className="flex items-center gap-4">
-        <span className="font-medium">Hello, {user.username}</span>
+        <span className="font-medium">Hello {user.username}</span>
         <Link href="/products" className="hover:underline">
           Menu
         </Link>
