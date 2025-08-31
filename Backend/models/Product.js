@@ -1,3 +1,4 @@
+// models/Product.js
 const mongoose = require('mongoose');
 
 const productSchema = new mongoose.Schema({
@@ -6,6 +7,7 @@ const productSchema = new mongoose.Schema({
     category: { type: String, enum: ['Burger', 'Pizza', 'Fries', 'Drink', 'Dessert'], required: true },
     price: { type: Number, required: true },
     image: { type: String, required: true },
+    imagePublicId: { type: String }, // Cloudinary public ID for deletion
     bestSeller: { type: Boolean, default: false },
     createdAt: { type: Date, default: Date.now }
 });

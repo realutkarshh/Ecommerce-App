@@ -5,6 +5,7 @@ import { getProducts, getBestSellers, getProductsByCategory } from '@/lib/api';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useCart } from '@/app/context/cart-context';
+import { useWishlist } from '@/app/context/wishlist-context'; // Add this import
 
 interface Product {
   _id: string;
@@ -23,6 +24,7 @@ export default function ProductsPage() {
   const [bestSellers, setBestSellers] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const { addToCart } = useCart();
+  const { addToWishlist, removeFromWishlist, isInWishlist } = useWishlist(); // Add this
 
   useEffect(() => {
     async function fetchData() {
@@ -46,6 +48,15 @@ export default function ProductsPage() {
   }, [category]);
 
   const categories = ['Burger', 'Pizza', 'Fries', 'Drink', 'Dessert'];
+
+  // Handle wishlist toggle
+  const handleWishlistToggle = (productId: string) => {
+    if (isInWishlist(productId)) {
+      removeFromWishlist(productId);
+    } else {
+      addToWishlist(productId);
+    }
+  };
 
   if (loading) return <div className="p-8 text-center">Loading products...</div>;
 
@@ -77,6 +88,8 @@ export default function ProductsPage() {
           </Link>
         ))}
       </div>
+
+      {/* Best Sellers Section */}
       <section className="mb-12">
         <h2 className="text-xl font-bold mb-4">Best Sellers</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -85,7 +98,7 @@ export default function ProductsPage() {
               key={product._id}
               className="bg-white rounded-lg shadow p-6 transition hover:shadow-lg relative"
             >
-              <Link href={`/products/${product._id}`} className="block">
+              <Link href={`/products/${product._id}`} className="block mb-4">
                 <img
                   src={product.image}
                   alt={product.name}
@@ -100,16 +113,34 @@ export default function ProductsPage() {
                   </div>
                 )}
               </Link>
-              <button
-                onClick={() => addToCart(product._id)}
-                className="absolute bottom-4 right-4 bg-blue-500 hover:bg-blue-600 text-white py-1 px-3 rounded text-sm"
-              >
-                Add to Cart
-              </button>
+              
+              {/* Action Buttons - Updated Layout */}
+              <div className="flex justify-between items-center gap-2">
+                <button
+                  onClick={() => handleWishlistToggle(product._id)}
+                  className={`p-2 rounded-full transition-colors ${
+                    isInWishlist(product._id) 
+                      ? 'bg-red-100 text-red-600 hover:bg-red-200' 
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                  title={isInWishlist(product._id) ? 'Remove from wishlist' : 'Add to wishlist'}
+                >
+                  {isInWishlist(product._id) ? '❤️' : '🤍'}
+                </button>
+                
+                <button
+                  onClick={() => addToCart(product._id)}
+                  className="bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded text-sm flex-1"
+                >
+                  Add to Cart
+                </button>
+              </div>
             </div>
           ))}
         </div>
       </section>
+
+      {/* All Items Section */}
       <section>
         <h2 className="text-xl font-bold mb-4">
           {category ? `${category}s` : 'All Items'}
@@ -120,7 +151,7 @@ export default function ProductsPage() {
               key={product._id}
               className="bg-white rounded-lg shadow p-6 transition hover:shadow-lg relative"
             >
-              <Link href={`/products/${product._id}`} className="block">
+              <Link href={`/products/${product._id}`} className="block mb-4">
                 <img
                   src={product.image}
                   alt={product.name}
@@ -135,12 +166,28 @@ export default function ProductsPage() {
                   </div>
                 )}
               </Link>
-              <button
-                onClick={() => addToCart(product._id)}
-                className="absolute bottom-4 right-4 bg-blue-500 hover:bg-blue-600 text-white py-1 px-3 rounded text-sm"
-              >
-                Add to Cart
-              </button>
+              
+              {/* Action Buttons - Updated Layout */}
+              <div className="flex justify-between items-center gap-2">
+                <button
+                  onClick={() => handleWishlistToggle(product._id)}
+                  className={`p-2 rounded-full transition-colors ${
+                    isInWishlist(product._id) 
+                      ? 'bg-red-100 text-red-600 hover:bg-red-200' 
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                  title={isInWishlist(product._id) ? 'Remove from wishlist' : 'Add to wishlist'}
+                >
+                  {isInWishlist(product._id) ? '❤️' : '🤍'}
+                </button>
+                
+                <button
+                  onClick={() => addToCart(product._id)}
+                  className="bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded text-sm flex-1"
+                >
+                  Add to Cart
+                </button>
+              </div>
             </div>
           ))}
         </div>
