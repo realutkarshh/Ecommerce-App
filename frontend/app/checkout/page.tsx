@@ -1,13 +1,19 @@
-// app/checkout/page.tsx
 'use client';
 
 import { useCart } from '@/app/context/cart-context';
 import { useUser } from '@/app/context/user-context';
-import { getProductById } from '@/lib/api';
+import { getProductById, createRazorpayOrder, placeOrder } from '@/lib/api';
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { Order } from "@/types/order";
+
+declare global {
+  interface Window {
+    Razorpay: any;
+  }
+}
 
 interface Product {
   _id: string;
@@ -32,13 +38,51 @@ export default function CheckoutPage() {
   const [error, setError] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [orderSuccess, setOrderSuccess] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState('card');
-  const [deliveryAddress, setDeliveryAddress] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<'online' | 'cod'>('online');
+  const [showCodWarning, setShowCodWarning] = useState(false);
+  const [isRazorpayLoaded, setIsRazorpayLoaded] = useState(false);
+  
+  // Address form state
+  const [address, setAddress] = useState({
+    street: '',
+    city: '',
+    state: '',
+    zip: ''
+  });
+  
   const [specialInstructions, setSpecialInstructions] = useState('');
+
+  // Load Razorpay script
+  useEffect(() => {
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    script.onload = () => {
+      setIsRazorpayLoaded(true);
+    };
+    script.onerror = () => {
+      console.error('Failed to load Razorpay script');
+      setError('Payment system failed to load. Please refresh the page.');
+    };
+    document.body.appendChild(script);
+
+    return () => {
+      // Clean up script on unmount
+      const existingScript = document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]');
+      if (existingScript) {
+        document.body.removeChild(existingScript);
+      }
+    };
+  }, []);
 
   // Fetch product details for each cart item
   useEffect(() => {
     const fetchProducts = async () => {
+      if (!cart || cart.length === 0) {
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       try {
         const items = await Promise.all(
@@ -64,30 +108,138 @@ export default function CheckoutPage() {
   const deliveryFee = subtotal > 499 ? 0 : 50;
   const total = subtotal + tax + deliveryFee;
 
-  const handlePlaceOrder = async () => {
-    if (!deliveryAddress.trim()) {
-      setError('Please provide a delivery address.');
+  const handlePaymentMethodChange = (method: 'online' | 'cod') => {
+    setPaymentMethod(method);
+    if (method === 'cod') {
+      setShowCodWarning(true);
+      setTimeout(() => setShowCodWarning(false), 5000);
+    }
+  };
+
+  const validateForm = () => {
+    if (!address.street || !address.city || !address.state || !address.zip) {
+      setError('Please fill in all address fields');
+      return false;
+    }
+    if (cart.length === 0) {
+      setError('Your cart is empty');
+      return false;
+    }
+    if (!user?.token) {
+      setError('Authentication required. Please log in again.');
+      return false;
+    }
+    return true;
+  };
+
+  const handleOnlinePayment = async () => {
+    if (!validateForm() || !user?.token) return;
+
+    if (!isRazorpayLoaded || !window.Razorpay) {
+      setError('Payment system is still loading. Please try again in a moment.');
       return;
     }
 
-    setIsProcessing(true);
-    setError('');
-
-    // Simulate order processing
     try {
-      // Here you would normally integrate with your payment provider
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      setIsProcessing(true);
+      setError('');
       
+      // Create Razorpay order
+      const razorpayOrder = await createRazorpayOrder(total, user.token);
+      
+      const options = {
+        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+        amount: razorpayOrder.amount,
+        currency: razorpayOrder.currency,
+        name: 'Burger Pizza',
+        description: 'Food Order Payment',
+        order_id: razorpayOrder.id,
+        handler: async (response: any) => {
+          try {
+            // Place order after successful payment
+            const orderData = {
+              items: cart.map(item => ({ product: item.productId, quantity: item.quantity })),
+              totalAmount: total,
+              paymentMethod: 'online' as const,
+              deliveryAddress: address,
+              razorpayOrderId: razorpayOrder.id
+            };
+
+            if (!user?.token) {
+              throw new Error('Authentication token not found');
+            }
+
+            const order = await placeOrder(orderData, user.token);
+            setOrderSuccess(true);
+            clearCart();
+            
+            // Redirect after 3 seconds
+            setTimeout(() => {
+              router.push(`/orders?success=true&orderId=${order._id}`);
+            }, 3000);
+          } catch (error) {
+            console.error('Order placement failed:', error);
+            setError('Order placement failed. Please contact support.');
+            setIsProcessing(false);
+          }
+        },
+        prefill: {
+          name: user.username || '',
+        },
+        theme: {
+          color: '#F97316'
+        },
+        modal: {
+          ondismiss: () => {
+            setIsProcessing(false);
+          }
+        }
+      };
+
+      const razorpay = new window.Razorpay(options);
+      razorpay.open();
+    } catch (error) {
+      console.error('Payment initialization failed:', error);
+      setError('Payment initialization failed. Please try again.');
+      setIsProcessing(false);
+    }
+  };
+
+  const handleCodOrder = async () => {
+    if (!validateForm() || !user?.token) return;
+
+    try {
+      setIsProcessing(true);
+      setError('');
+      
+      const orderData = {
+        items: cart.map(item => ({ product: item.productId, quantity: item.quantity })),
+        totalAmount: total,
+        paymentMethod: 'cod' as const,
+        deliveryAddress: address
+      };
+
+      console.log('Placing COD order with data:', orderData); // Debug log
+
+      const order = await placeOrder(orderData, user.token);
       setOrderSuccess(true);
       clearCart();
       
       // Redirect after 3 seconds
       setTimeout(() => {
-        router.push('/orders');
+        router.push(`/orders?success=true&orderId=${order._id}`);
       }, 3000);
+    } catch (error: any) {
+      console.error('Order placement failed:', error);
       
-    } catch (err) {
-      setError('Payment failed. Please try again.');
+      // Better error handling
+      if (error.response?.data?.error) {
+        setError(`Order failed: ${error.response.data.error}`);
+      } else if (error.message) {
+        setError(`Order failed: ${error.message}`);
+      } else {
+        setError('Order placement failed. Please try again.');
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -236,14 +388,42 @@ export default function CheckoutPage() {
                 </div>
                 <h2 className="text-xl font-bold text-gray-800">Delivery Address</h2>
               </div>
-              <textarea
-                placeholder="Enter your complete delivery address..."
-                className="w-full p-4 rounded-2xl border border-gray-300 bg-white hover:border-orange-300 focus:border-orange-500 focus:outline-none focus:ring-4 focus:ring-orange-100 transition-all duration-200 resize-none"
-                rows={3}
-                value={deliveryAddress}
-                onChange={(e) => setDeliveryAddress(e.target.value)}
-                required
-              />
+              <div className="space-y-4">
+                <input
+                  type="text"
+                  placeholder="Street Address"
+                  value={address.street}
+                  onChange={(e) => setAddress({ ...address, street: e.target.value })}
+                  className="w-full p-4 rounded-2xl border border-gray-300 bg-white hover:border-orange-300 focus:border-orange-500 focus:outline-none focus:ring-4 focus:ring-orange-100 transition-all duration-200"
+                  required
+                />
+                <div className="grid grid-cols-2 gap-4">
+                  <input
+                    type="text"
+                    placeholder="City"
+                    value={address.city}
+                    onChange={(e) => setAddress({ ...address, city: e.target.value })}
+                    className="w-full p-4 rounded-2xl border border-gray-300 bg-white hover:border-orange-300 focus:border-orange-500 focus:outline-none focus:ring-4 focus:ring-orange-100 transition-all duration-200"
+                    required
+                  />
+                  <input
+                    type="text"
+                    placeholder="State"
+                    value={address.state}
+                    onChange={(e) => setAddress({ ...address, state: e.target.value })}
+                    className="w-full p-4 rounded-2xl border border-gray-300 bg-white hover:border-orange-300 focus:border-orange-500 focus:outline-none focus:ring-4 focus:ring-orange-100 transition-all duration-200"
+                    required
+                  />
+                </div>
+                <input
+                  type="text"
+                  placeholder="ZIP Code"
+                  value={address.zip}
+                  onChange={(e) => setAddress({ ...address, zip: e.target.value })}
+                  className="w-full p-4 rounded-2xl border border-gray-300 bg-white hover:border-orange-300 focus:border-orange-500 focus:outline-none focus:ring-4 focus:ring-orange-100 transition-all duration-200"
+                  required
+                />
+              </div>
             </div>
 
             {/* Payment Method */}
@@ -261,50 +441,51 @@ export default function CheckoutPage() {
                   <input
                     type="radio"
                     name="payment"
-                    value="card"
-                    checked={paymentMethod === 'card'}
-                    onChange={(e) => setPaymentMethod(e.target.value)}
+                    value="online"
+                    checked={paymentMethod === 'online'}
+                    onChange={() => handlePaymentMethodChange('online')}
                     className="w-4 h-4 text-orange-500 border-gray-300 focus:ring-orange-500"
                   />
                   <div className="flex items-center gap-2">
                     <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
                     </svg>
-                    <span className="font-medium">Credit/Debit Card</span>
+                    <span className="font-medium">💳 Pay Online (Recommended)</span>
                   </div>
                 </label>
-                <label className="flex items-center gap-3 p-4 bg-gray-50 hover:bg-gray-100 rounded-2xl cursor-pointer transition-colors">
-                  <input
-                    type="radio"
-                    name="payment"
-                    value="upi"
-                    checked={paymentMethod === 'upi'}
-                    onChange={(e) => setPaymentMethod(e.target.value)}
-                    className="w-4 h-4 text-orange-500 border-gray-300 focus:ring-orange-500"
-                  />
-                  <div className="flex items-center gap-2">
-                    <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                    </svg>
-                    <span className="font-medium">UPI Payment</span>
-                  </div>
-                </label>
+                
                 <label className="flex items-center gap-3 p-4 bg-gray-50 hover:bg-gray-100 rounded-2xl cursor-pointer transition-colors">
                   <input
                     type="radio"
                     name="payment"
                     value="cod"
                     checked={paymentMethod === 'cod'}
-                    onChange={(e) => setPaymentMethod(e.target.value)}
+                    onChange={() => handlePaymentMethodChange('cod')}
                     className="w-4 h-4 text-orange-500 border-gray-300 focus:ring-orange-500"
                   />
                   <div className="flex items-center gap-2">
                     <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
                     </svg>
-                    <span className="font-medium">Cash on Delivery</span>
+                    <span className="font-medium">💵 Cash on Delivery</span>
                   </div>
                 </label>
+
+                {/* COD Warning */}
+                {showCodWarning && (
+                  <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-2xl">
+                    <div className="flex">
+                      <div className="flex-shrink-0">
+                        <span className="text-yellow-400">⚠️</span>
+                      </div>
+                      <div className="ml-3">
+                        <p className="text-sm text-yellow-700">
+                          <strong>Note:</strong> Cash on Delivery orders have less priority than online payment orders.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -393,6 +574,14 @@ export default function CheckoutPage() {
               </div>
             </div>
 
+            {/* Payment System Status */}
+            {paymentMethod === 'online' && !isRazorpayLoaded && (
+              <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 flex items-center gap-3 text-blue-700">
+                <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin flex-shrink-0"></div>
+                <span className="font-medium text-sm">Loading payment system...</span>
+              </div>
+            )}
+
             {/* Error Message */}
             {error && (
               <div className="bg-red-50 border border-red-200 rounded-2xl p-4 flex items-center gap-3 text-red-700">
@@ -405,25 +594,47 @@ export default function CheckoutPage() {
 
             {/* Action Buttons */}
             <div className="space-y-4">
-              <button
-                onClick={handlePlaceOrder}
-                disabled={isProcessing || !deliveryAddress.trim()}
-                className="w-full flex items-center justify-center gap-3 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 disabled:from-gray-400 disabled:to-gray-500 text-white py-4 px-8 rounded-2xl font-bold text-lg transition-all duration-200 hover:scale-105 disabled:hover:scale-100 shadow-lg disabled:shadow-none"
-              >
-                {isProcessing ? (
-                  <>
-                    <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    Processing Order...
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-                    </svg>
-                    Place Order - ₹{total}
-                  </>
-                )}
-              </button>
+              {paymentMethod === 'online' ? (
+                <button
+                  onClick={handleOnlinePayment}
+                  disabled={isProcessing || !isRazorpayLoaded || !address.street || !address.city || !address.state || !address.zip}
+                  className="w-full flex items-center justify-center gap-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 disabled:from-gray-400 disabled:to-gray-500 text-white py-4 px-8 rounded-2xl font-bold text-lg transition-all duration-200 hover:scale-105 disabled:hover:scale-100 shadow-lg disabled:shadow-none"
+                >
+                  {isProcessing ? (
+                    <>
+                      <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      Processing Payment...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                      </svg>
+                      Pay ₹{total} Online
+                    </>
+                  )}
+                </button>
+              ) : (
+                <button
+                  onClick={handleCodOrder}
+                  disabled={isProcessing || !address.street || !address.city || !address.state || !address.zip}
+                  className="w-full flex items-center justify-center gap-3 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 disabled:from-gray-400 disabled:to-gray-500 text-white py-4 px-8 rounded-2xl font-bold text-lg transition-all duration-200 hover:scale-105 disabled:hover:scale-100 shadow-lg disabled:shadow-none"
+                >
+                  {isProcessing ? (
+                    <>
+                      <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      Placing Order...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+                      </svg>
+                      Place COD Order - ₹{total}
+                    </>
+                  )}
+                </button>
+              )}
 
               <Link
                 href="/cart"

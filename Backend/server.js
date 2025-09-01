@@ -16,6 +16,7 @@ const orderRoutes = require('./routes/order');
 const feedbackRoutes = require('./routes/feedback');
 const userRouter = require('./routes/user');
 const adminRoutes = require('./routes/admin');
+const paymentRoutes = require('./routes/payment');
 
 
 
@@ -25,6 +26,7 @@ app.use('/orders', orderRoutes);
 app.use('/feedback', feedbackRoutes);
 app.use('/users', userRouter);
 app.use('/admin', adminRoutes);
+app.use('/payment', paymentRoutes);
 
 // MongoDB Connection
 mongoose.connect(process.env.MONGODB_URI, { 

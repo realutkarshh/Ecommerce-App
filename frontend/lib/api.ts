@@ -1,6 +1,7 @@
 import axios from 'axios';
+import { Order, OrderInput } from "@/types/order";
 
-const API_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
 // ========== AUTHENTICATION APIs ==========
 
@@ -29,18 +30,6 @@ interface Product {
 interface CartItem {
   product: string;
   quantity: number;
-}
-
-interface Order {
-  _id: string;
-  user: string;
-  items: {
-    product: Product;
-    quantity: number;
-  }[];
-  totalAmount: number;
-  status: string;
-  createdAt: string;
 }
 
 // ========== PRODUCT APIs ==========
@@ -83,7 +72,6 @@ export async function getUserWishlist(token: string): Promise<Product[]> {
     console.log('Wishlist response:', response.data);
     return response.data;
   } catch (error) {
-    console.error('Wishlist API error:', error.response?.data || error.message);
     throw error;
   }
 }
@@ -127,7 +115,6 @@ export async function getUserCart(token: string): Promise<any> {
     console.log('Cart response:', response.data);
     return response.data;
   } catch (error) {
-    console.error('Cart API error:', error.response?.data || error.message);
     throw error;
   }
 }
@@ -162,28 +149,6 @@ export async function clearCart(token: string): Promise<any> {
 
 export async function getCartCount(token: string): Promise<{ count: number }> {
   const response = await axios.get(`${API_URL}/users/cart/count`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  return response.data;
-}
-
-// ========== ORDER APIs ==========
-
-export async function placeOrder(
-  items: CartItem[],
-  totalAmount: number,
-  token: string
-): Promise<any> {
-  const response = await axios.post(
-    `${API_URL}/orders`,
-    { items, totalAmount },
-    { headers: { Authorization: `Bearer ${token}` } }
-  );
-  return response.data;
-}
-
-export async function getUserOrders(token: string): Promise<Order[]> {
-  const response = await axios.get(`${API_URL}/orders/user`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   return response.data;
@@ -313,5 +278,62 @@ export const apiRequest = async (requestFn: () => Promise<any>) => {
   }
 };
 
-// Example usage of wrapper:
-// const products = await apiRequest(() => getProducts());
+
+export async function getUserOrders(token: string): Promise<Order[]> {
+  const response = await axios.get(`${API_URL}/orders/user`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return response.data;
+}
+
+
+export async function placeOrder(orderData: OrderInput, token: string): Promise<Order> {
+  const response = await axios.post(`${API_URL}/orders`, orderData, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return response.data as Order;
+}
+
+// ========== PAYMENT APIs ==========
+
+export async function createRazorpayOrder(amount: number, token: string): Promise<any> {
+  const response = await axios.post(`${API_URL}/payment/create-order`, 
+    { amount }, 
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  return response.data;
+}
+
+export async function verifyPayment(paymentData: {
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
+}): Promise<any> {
+  const response = await axios.post(`${API_URL}/payment/verify-payment`, paymentData);
+  return response.data;
+}
+
+// ========== FEEDBACK APIs ==========
+
+export async function getFeedbackEligibility(token: string): Promise<any[]> {
+  const response = await axios.get(`${API_URL}/feedback/eligible`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return response.data;
+}
+
+export async function submitFeedback(
+  feedbackData: {
+    order: string;
+    product: string;
+    rating: number;
+    comment?: string;
+  },
+  token: string
+): Promise<any> {
+  const response = await axios.post(`${API_URL}/feedback`, feedbackData, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return response.data;
+}
+
