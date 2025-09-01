@@ -46,19 +46,6 @@ It comes with a **User Panel** (for shopping) and an **Admin Panel** (for managi
 
 ---
 
-## 📸 Screenshots  
-
-> Replace with actual screenshots of your project  
-
-- 🏠 Homepage  
-- 🔎 Product Details Page  
-- 🛒 Cart Page  
-- 💳 Checkout with Razorpay  
-- 📦 Orders Page  
-- 🛠️ Admin Dashboard  
-
----
-
 ## 🔮 Future Improvements  
 
 - 🔐 Role-based authentication (Admin/User separation in frontend UI)  
