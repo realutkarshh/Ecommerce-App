@@ -105,7 +105,7 @@ export default function CheckoutPage() {
   // Calculate totals
   const subtotal = orderItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const tax = Math.round(subtotal * 0.05); // 5% tax
-  const deliveryFee = subtotal > 499 ? 0 : 50;
+  const deliveryFee = subtotal > 1 ? 0 : 50;
   const total = subtotal + tax + deliveryFee;
 
   const handlePaymentMethodChange = (method: 'online' | 'cod') => {

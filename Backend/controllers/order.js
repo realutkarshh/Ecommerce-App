@@ -109,17 +109,24 @@ exports.updatePaymentStatus = async (req, res) => {
 
 
 // User: Get their own orders
+// In getUserOrders function
 exports.getUserOrders = async (req, res) => {
     try {
         const user = req.user._id;
         const orders = await Order.find({ user })
-            .populate('items.product')
+            .populate({
+                path: 'items.product',
+                select: 'name price image category', // Specify fields to populate
+                // Add this to handle deleted products gracefully
+                options: { strictPopulate: false }
+            })
             .sort({ createdAt: -1 });
         res.json(orders);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
 };
+
 
 // Admin: Get all orders - UPDATED for frontend
 exports.getAllOrders = async (req, res) => {
@@ -175,5 +182,34 @@ exports.getTodaySales = async (req, res) => {
         res.json({ totalSales, orders });
     } catch (error) {
         res.status(500).json({ error: error.message });
+    }
+};
+
+
+// Update the existing updateOrderStatus function to handle both status and paymentStatus
+exports.updateOrderStatus = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status, paymentStatus } = req.body; // Accept both status and paymentStatus
+        
+        const updateData = {};
+        if (status) updateData.status = status;
+        if (paymentStatus) updateData.paymentStatus = paymentStatus;
+        
+        const order = await Order.findByIdAndUpdate(
+            id, 
+            updateData, 
+            { new: true }
+        )
+        .populate('user', 'username email')
+        .populate('items.product', 'name price image');
+        
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+        
+        res.json(order);
+    } catch (error) {
+        res.status(400).json({ error: error.message });
     }
 };

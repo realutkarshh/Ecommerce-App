@@ -1,7 +1,7 @@
-// app/orders/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation'; // Add this import
 import ProtectedRoute from '../../components/ProtectedRoute';
 import AdminLayout from '../../components/AdminLayout';
 import { useAdmin } from '../../context/AdminContext';
@@ -52,6 +52,7 @@ const paymentStatusColors = {
 
 export default function OrdersPage() {
   const { admin } = useAdmin();
+  const router = useRouter(); // Add this
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -96,7 +97,11 @@ export default function OrdersPage() {
     fetchOrders();
   }, [admin]);
 
-  const handleStatusUpdate = async (orderId: string, newStatus: string) => {
+  const handleStatusUpdate = async (orderId: string, newStatus: string, event?: React.MouseEvent) => {
+    if (event) {
+      event.stopPropagation(); // Prevent row click when clicking dropdown
+    }
+    
     if (!admin?.token) return;
     
     try {
@@ -120,6 +125,42 @@ export default function OrdersPage() {
       console.error('Status update error:', err);
       alert(`Failed to update order status: ${err.message}`);
     }
+  };
+
+  // Add payment status update function
+  const handlePaymentStatusUpdate = async (orderId: string, newPaymentStatus: string, event?: React.MouseEvent) => {
+    if (event) {
+      event.stopPropagation(); // Prevent row click when clicking dropdown
+    }
+    
+    if (!admin?.token) return;
+    
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000'}/orders/${orderId}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${admin.token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ paymentStatus: newPaymentStatus }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to update payment status: ${errorText}`);
+      }
+
+      // Refresh orders after update
+      await fetchOrders();
+    } catch (err: any) {
+      console.error('Payment status update error:', err);
+      alert(`Failed to update payment status: ${err.message}`);
+    }
+  };
+
+  // Add row click handler
+  const handleRowClick = (orderId: string) => {
+    router.push(`/orders/${orderId}`);
   };
 
   // Filter and sort orders
@@ -298,7 +339,11 @@ export default function OrdersPage() {
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {filteredOrders.map((order) => (
-                      <tr key={order._id} className="hover:bg-gray-50">
+                      <tr 
+                        key={order._id} 
+                        className="hover:bg-gray-50 cursor-pointer transition-colors"
+                        onClick={() => handleRowClick(order._id)}
+                      >
                         {/* Order Details */}
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm">
@@ -334,7 +379,7 @@ export default function OrdersPage() {
                           <div className="text-sm">
                             {order.items.slice(0, 2).map((item, index) => (
                               <div key={index} className="text-gray-900">
-                                {item.quantity}x {item.product.name}
+                                {/* {item.quantity}x {item.product.name} */}
                               </div>
                             ))}
                             {order.items.length > 2 && (
@@ -354,11 +399,27 @@ export default function OrdersPage() {
                               {order.paymentMethod === 'online' ? '💳 Online' : '💵 COD'}
                             </span>
                             <div className="mt-1">
-                              <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                                paymentStatusColors[order.paymentStatus]
-                              }`}>
-                                {order.paymentStatus}
-                              </span>
+                              {/* Make payment status clickable for COD orders */}
+                              {order.paymentMethod === 'cod' ? (
+                                <select
+                                  value={order.paymentStatus}
+                                  onChange={(e) => handlePaymentStatusUpdate(order._id, e.target.value)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className={`text-xs font-semibold rounded-full border-0 cursor-pointer ${
+                                    paymentStatusColors[order.paymentStatus]
+                                  }`}
+                                >
+                                  <option value="pending">Pending</option>
+                                  <option value="completed">Completed</option>
+                                  <option value="failed">Failed</option>
+                                </select>
+                              ) : (
+                                <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                                  paymentStatusColors[order.paymentStatus]
+                                }`}>
+                                  {order.paymentStatus}
+                                </span>
+                              )}
                             </div>
                           </div>
                         </td>
@@ -377,6 +438,7 @@ export default function OrdersPage() {
                           <select
                             value={order.status}
                             onChange={(e) => handleStatusUpdate(order._id, e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
                             className="px-3 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                           >
                             <option value="placed">Placed</option>
@@ -398,6 +460,9 @@ export default function OrdersPage() {
           {!loading && !error && filteredOrders.length > 0 && (
             <div className="text-center text-gray-500 text-sm">
               Showing {filteredOrders.length} of {orders.length} orders
+              <div className="mt-2 text-xs">
+                💡 Click on any order row to view detailed information
+              </div>
             </div>
           )}
         </div>
