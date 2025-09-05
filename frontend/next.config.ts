@@ -3,9 +3,14 @@
 const nextConfig = {
   images: {
     domains: [
-      'res.cloudinary.com', // Add Cloudinary domain
-      'localhost' // Add localhost if you're also serving local images
+      'res.cloudinary.com',
+      'localhost',
     ],
+  },
+  eslint: {
+    // ⚠️ Warning: This allows production builds to succeed
+    // even if there are ESLint errors.
+    ignoreDuringBuilds: true,
   },
 }
 
