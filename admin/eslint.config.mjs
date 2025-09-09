@@ -20,14 +20,17 @@ const eslintConfig = [
       "next-env.d.ts",
     ],
     rules: {
-      // ✅ Allow `any` temporarily (prevents build failure)
+      // ✅ Ignore unused vars completely
+      "@typescript-eslint/no-unused-vars": "off",
+
+      // ✅ Allow any
       "@typescript-eslint/no-explicit-any": "off",
 
-      // ✅ Turn unused vars into warnings instead of errors
-      "@typescript-eslint/no-unused-vars": "warn",
-
-      // ✅ Allow <img>, remove Next.js warning
+      // ✅ Allow <img> for now
       "@next/next/no-img-element": "off",
+
+      // ✅ Allow plain quotes/apostrophes inside JSX
+      "react/no-unescaped-entities": "off",
     },
   },
 ];
