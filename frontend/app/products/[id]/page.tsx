@@ -7,8 +7,9 @@ import Link from 'next/link';
 import { useUser } from '@/app/context/user-context';
 import { useCart } from '@/app/context/cart-context';
 import { useWishlist } from '@/app/context/wishlist-context';
-import { placeOrder } from '@/lib/api';
 import Image from 'next/image';
+// Import your existing types
+import { OrderInput } from '@/types/order';
 
 interface Product {
   _id: string;
@@ -28,7 +29,7 @@ export default function ProductDetailsPage() {
   const [quantity, setQuantity] = useState(1);
   const [isAddingToCart, setIsAddingToCart] = useState(false);
   const { user } = useUser();
-  const { cart, addToCart } = useCart();
+  const { addToCart } = useCart();
   const { addToWishlist, removeFromWishlist, isInWishlist } = useWishlist();
   const router = useRouter();
 
@@ -47,6 +48,7 @@ export default function ProductDetailsPage() {
     fetchProduct();
   }, [id]);
 
+  // Fixed handleAddToCart - only adds to cart, doesn't place order
   const handleAddToCart = async () => {
     if (!user?.token) {
       alert('Please log in to add items to your cart.');
@@ -57,34 +59,19 @@ export default function ProductDetailsPage() {
 
     setIsAddingToCart(true);
 
-    // Add multiple quantities to cart
-    for (let i = 0; i < quantity; i++) {
-      addToCart(product._id);
-    }
-
     try {
-      const currentCartItems = cart.map((item) => ({
-        product: item.productId,
-        quantity: item.quantity,
-      }));
-      
-      if (!cart.some((item) => item.productId === product._id)) {
-        currentCartItems.push({ product: product._id, quantity: quantity });
+      // Add multiple quantities to cart using context
+      for (let i = 0; i < quantity; i++) {
+        addToCart(product._id);
       }
 
-      const totalAmount = currentCartItems.reduce(
-        (sum, item) => sum + (item.quantity * product.price),
-        0
-      );
-
-      await placeOrder(currentCartItems, totalAmount, user.token);
-      
-      // Show success feedback
+      // Show success feedback and redirect to cart
       setTimeout(() => {
         router.push('/cart');
       }, 1000);
     } catch (err) {
       console.error('Failed to add to cart:', err);
+      alert('Failed to add item to cart. Please try again.');
     } finally {
       setIsAddingToCart(false);
     }
@@ -97,6 +84,15 @@ export default function ProductDetailsPage() {
     } else {
       addToWishlist(product._id);
     }
+  };
+
+  // Quantity controls
+  const incrementQuantity = () => {
+    setQuantity(prev => prev + 1);
+  };
+
+  const decrementQuantity = () => {
+    setQuantity(prev => (prev > 1 ? prev - 1 : 1));
   };
 
   if (loading) {
@@ -213,7 +209,7 @@ export default function ProductDetailsPage() {
               </div>
 
               {/* Price */}
-              <div className="mb-8">
+              <div className="mb-6">
                 <div className="flex items-baseline gap-3">
                   <span className="text-4xl font-bold text-gray-800">₹{product.price}</span>
                   <span className="text-gray-500 text-lg">per item</span>
@@ -223,6 +219,35 @@ export default function ProductDetailsPage() {
                     <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                   </svg>
                   Free delivery on orders above ₹499
+                </div>
+              </div>
+
+              {/* Quantity Selector */}
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-3">Quantity</label>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={decrementQuantity}
+                    disabled={quantity <= 1}
+                    className="w-10 h-10 rounded-full border-2 border-gray-300 flex items-center justify-center hover:border-orange-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+                    </svg>
+                  </button>
+                  <span className="w-12 text-center text-lg font-semibold">{quantity}</span>
+                  <button
+                    onClick={incrementQuantity}
+                    className="w-10 h-10 rounded-full border-2 border-gray-300 flex items-center justify-center hover:border-orange-300 transition-colors"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                    </svg>
+                  </button>
+                  <div className="ml-4">
+                    <span className="text-gray-600">Total: </span>
+                    <span className="text-xl font-bold text-gray-800">₹{product.price * quantity}</span>
+                  </div>
                 </div>
               </div>
 
