@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { Order, OrderInput } from "@/types/order";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://food-commerce-backend-js7p.onrender.com';
 
 // ========== AUTHENTICATION APIs ==========
 
