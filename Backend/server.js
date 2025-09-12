@@ -6,7 +6,25 @@ const cors = require('cors');
 
 const app = express();
 app.use(bodyParser.json());
-app.use(cors());
+
+// ✅ Allow requests only from main site + admin site
+const allowedOrigins = [
+  process.env.MAIN_URL,   // e.g., https://mywebsite.com
+  process.env.ADMIN_URL,  // e.g., https://admin.mywebsite.com
+];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    } else {
+      return callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true, // if you need cookies/auth headers
+}));
 
 // ...after your MongoDB connection
 
@@ -17,8 +35,6 @@ const feedbackRoutes = require('./routes/feedback');
 const userRouter = require('./routes/user');
 const adminRoutes = require('./routes/admin');
 const paymentRoutes = require('./routes/payment');
-
-
 
 app.use('/auth', authRoutes);
 app.use('/products', productRoutes);
