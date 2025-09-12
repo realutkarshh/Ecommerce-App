@@ -3,7 +3,6 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import ProtectedRoute from '../../../components/ProtectedRoute';
 import AdminLayout from '../../../components/AdminLayout';
 import { useAdmin } from '../../../context/AdminContext';
@@ -28,7 +27,7 @@ interface FormData {
 }
 
 interface EditProductPageProps {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }
 
 export default function EditProductPage({ params }: EditProductPageProps) {
@@ -36,6 +35,7 @@ export default function EditProductPage({ params }: EditProductPageProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   
+  const [productId, setProductId] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [fetchLoading, setFetchLoading] = useState(true);
   const [formData, setFormData] = useState<FormData>({
@@ -55,10 +55,24 @@ export default function EditProductPage({ params }: EditProductPageProps) {
 
   const categories = ['Burger', 'Pizza', 'Fries', 'Drink', 'Dessert'];
 
+  // Extract ID from params Promise
+  useEffect(() => {
+    const getParamsId = async () => {
+      try {
+        const resolvedParams = await params;
+        setProductId(resolvedParams.id);
+      } catch (error) {
+        console.error('Error resolving params:', error);
+        setError('Invalid product ID');
+        setFetchLoading(false);
+      }
+    };
+
+    getParamsId();
+  }, [params]);
+
   const fetchProduct = useCallback(async () => {
-    if (!params.id) {
-      setError('Invalid product ID');
-      setFetchLoading(false);
+    if (!productId) {
       return;
     }
 
@@ -66,7 +80,7 @@ export default function EditProductPage({ params }: EditProductPageProps) {
       setFetchLoading(true);
       setError('');
       
-      const product = await getProduct(params.id);
+      const product = await getProduct(productId);
       
       if (!product) {
         throw new Error('Product not found');
@@ -90,11 +104,13 @@ export default function EditProductPage({ params }: EditProductPageProps) {
     } finally {
       setFetchLoading(false);
     }
-  }, [params.id]);
+  }, [productId]);
 
   useEffect(() => {
-    fetchProduct();
-  }, [fetchProduct]);
+    if (productId && admin?.token) {
+      fetchProduct();
+    }
+  }, [fetchProduct, productId, admin?.token]);
 
   const validateForm = (): boolean => {
     const errors: Partial<FormData> = {};
@@ -231,6 +247,11 @@ export default function EditProductPage({ params }: EditProductPageProps) {
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     
+    if (!productId) {
+      setError('Product ID is missing');
+      return;
+    }
+    
     // Clear previous errors
     setError('');
     setFieldErrors({});
@@ -263,7 +284,7 @@ export default function EditProductPage({ params }: EditProductPageProps) {
         form.append('image', newImage);
       }
 
-      await updateProduct(params.id, form, admin.token);
+      await updateProduct(productId, form, admin.token);
       
       // Show success message
       const successDiv = document.createElement('div');
@@ -339,7 +360,7 @@ export default function EditProductPage({ params }: EditProductPageProps) {
     );
   }
 
-  if (error && !formData.name) {
+  if (error && !formData.name && !productId) {
     return (
       <ProtectedRoute>
         <AdminLayout>
