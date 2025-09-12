@@ -1,6 +1,7 @@
+// app/orders/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import ProtectedRoute from '../../components/ProtectedRoute';
 import AdminLayout from '../../components/AdminLayout';
@@ -36,6 +37,10 @@ interface Order {
   createdAt: string;
 }
 
+type StatusType = Order['status'];
+type PaymentStatusType = Order['paymentStatus'];
+type SortType = 'date' | 'amount' | 'status';
+
 const statusColors = {
   placed: 'bg-blue-100 text-blue-800',
   preparing: 'bg-yellow-100 text-yellow-800',
@@ -57,9 +62,11 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<string>('all');
-  const [sortBy, setSortBy] = useState<'date' | 'amount' | 'status'>('date');
+  const [sortBy, setSortBy] = useState<SortType>('date');
+  const [updatingOrder, setUpdatingOrder] = useState<string | null>(null);
+  const [updatingPayment, setUpdatingPayment] = useState<string | null>(null);
 
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     if (!admin?.token) {
       setError('No admin token available');
       setLoading(false);
@@ -85,24 +92,36 @@ export default function OrdersPage() {
 
       const data = await response.json();
       setOrders(Array.isArray(data) ? data : []);
-    } catch (err: any) {
+    } catch (err) {
       console.error('Order fetch error:', err);
-      setError(err.message || 'Failed to fetch orders');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch orders';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
-  };
+  }, [admin?.token]);
 
   useEffect(() => {
-    fetchOrders();
-  }, [admin]);
+    if (admin?.token) {
+      fetchOrders();
+    }
+  }, [fetchOrders]);
 
   const handleStatusUpdate = async (orderId: string, newStatus: string, event?: React.MouseEvent) => {
     if (event) {
       event.stopPropagation();
     }
     
-    if (!admin?.token) return;
+    if (!admin?.token || !orderId || !newStatus) return;
+    
+    // Validate status
+    const validStatuses: StatusType[] = ['placed', 'preparing', 'prepared', 'out_for_delivery', 'delivered'];
+    if (!validStatuses.includes(newStatus as StatusType)) {
+      console.error('Invalid status:', newStatus);
+      return;
+    }
+    
+    setUpdatingOrder(orderId);
     
     try {
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000'}/orders/${orderId}`, {
@@ -119,10 +138,34 @@ export default function OrdersPage() {
         throw new Error(`Failed to update order: ${errorText}`);
       }
 
+      // Update local state immediately for better UX
+      setOrders(prevOrders => 
+        prevOrders.map(order => 
+          order._id === orderId 
+            ? { ...order, status: newStatus as StatusType }
+            : order
+        )
+      );
+      
+      // Refresh data from server
       await fetchOrders();
-    } catch (err: any) {
+    } catch (err) {
       console.error('Status update error:', err);
-      alert(`Failed to update order status: ${err.message}`);
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      
+      // Show user-friendly error
+      const errorDiv = document.createElement('div');
+      errorDiv.className = 'fixed top-4 right-4 bg-red-500 text-white px-4 py-2 rounded-lg shadow-lg z-50';
+      errorDiv.textContent = `Failed to update order status: ${errorMessage}`;
+      document.body.appendChild(errorDiv);
+      
+      setTimeout(() => {
+        if (document.body.contains(errorDiv)) {
+          document.body.removeChild(errorDiv);
+        }
+      }, 5000);
+    } finally {
+      setUpdatingOrder(null);
     }
   };
 
@@ -131,7 +174,16 @@ export default function OrdersPage() {
       event.stopPropagation();
     }
     
-    if (!admin?.token) return;
+    if (!admin?.token || !orderId || !newPaymentStatus) return;
+    
+    // Validate payment status
+    const validPaymentStatuses: PaymentStatusType[] = ['pending', 'completed', 'failed'];
+    if (!validPaymentStatuses.includes(newPaymentStatus as PaymentStatusType)) {
+      console.error('Invalid payment status:', newPaymentStatus);
+      return;
+    }
+    
+    setUpdatingPayment(orderId);
     
     try {
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000'}/orders/${orderId}`, {
@@ -148,45 +200,120 @@ export default function OrdersPage() {
         throw new Error(`Failed to update payment status: ${errorText}`);
       }
 
+      // Update local state immediately for better UX
+      setOrders(prevOrders => 
+        prevOrders.map(order => 
+          order._id === orderId 
+            ? { ...order, paymentStatus: newPaymentStatus as PaymentStatusType }
+            : order
+        )
+      );
+      
+      // Refresh data from server
       await fetchOrders();
-    } catch (err: any) {
+    } catch (err) {
       console.error('Payment status update error:', err);
-      alert(`Failed to update payment status: ${err.message}`);
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      
+      // Show user-friendly error
+      const errorDiv = document.createElement('div');
+      errorDiv.className = 'fixed top-4 right-4 bg-red-500 text-white px-4 py-2 rounded-lg shadow-lg z-50';
+      errorDiv.textContent = `Failed to update payment status: ${errorMessage}`;
+      document.body.appendChild(errorDiv);
+      
+      setTimeout(() => {
+        if (document.body.contains(errorDiv)) {
+          document.body.removeChild(errorDiv);
+        }
+      }, 5000);
+    } finally {
+      setUpdatingPayment(null);
     }
   };
 
   const handleRowClick = (orderId: string) => {
+    if (!orderId) {
+      console.error('Invalid order ID for navigation');
+      return;
+    }
     router.push(`/orders/${orderId}`);
   };
 
   const filteredOrders = orders
-    .filter(order => filter === 'all' || order.status === filter)
+    .filter(order => {
+      try {
+        return filter === 'all' || order?.status === filter;
+      } catch (error) {
+        console.error('Filtering error:', error);
+        return false;
+      }
+    })
     .sort((a, b) => {
-      switch (sortBy) {
-        case 'date':
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-        case 'amount':
-          return b.totalAmount - a.totalAmount;
-        case 'status':
-          return a.status.localeCompare(b.status);
-        default:
-          return 0;
+      try {
+        switch (sortBy) {
+          case 'date':
+            return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+          case 'amount':
+            return (b.totalAmount || 0) - (a.totalAmount || 0);
+          case 'status':
+            return (a.status || '').localeCompare(b.status || '');
+          default:
+            return 0;
+        }
+      } catch (error) {
+        console.error('Sorting error:', error);
+        return 0;
       }
     });
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString('en-IN', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    try {
+      return new Date(dateString).toLocaleString('en-IN', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch (error) {
+      console.error('Date formatting error:', error);
+      return 'Invalid date';
+    }
   };
 
   const formatAddress = (address: Order['deliveryAddress']) => {
-    return `${address.street}, ${address.city}, ${address.state} - ${address.zip}`;
+    try {
+      if (!address) return 'Address not available';
+      return `${address.street || ''}, ${address.city || ''}, ${address.state || ''} - ${address.zip || ''}`;
+    } catch (error) {
+      console.error('Address formatting error:', error);
+      return 'Invalid address';
+    }
   };
+
+  const handleFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setFilter(e.target.value);
+  };
+
+  const handleSortChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setSortBy(e.target.value as SortType);
+  };
+
+  const getOrderStats = () => {
+    try {
+      return {
+        total: orders.length,
+        pending: orders.filter(o => ['placed', 'preparing'].includes(o?.status || '')).length,
+        outForDelivery: orders.filter(o => o?.status === 'out_for_delivery').length,
+        delivered: orders.filter(o => o?.status === 'delivered').length
+      };
+    } catch (error) {
+      console.error('Stats calculation error:', error);
+      return { total: 0, pending: 0, outForDelivery: 0, delivered: 0 };
+    }
+  };
+
+  const stats = getOrderStats();
 
   return (
     <ProtectedRoute>
@@ -200,12 +327,13 @@ export default function OrdersPage() {
             </div>
             <button 
               onClick={fetchOrders}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 hover:bg-gray-800 text-white rounded-lg font-semibold transition-colors"
+              disabled={loading}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 hover:bg-gray-800 disabled:bg-gray-400 disabled:cursor-not-allowed text-white rounded-lg font-semibold transition-colors"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
-              Refresh
+              {loading ? 'Loading...' : 'Refresh'}
             </button>
           </div>
 
@@ -215,7 +343,7 @@ export default function OrdersPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold text-gray-600 mb-1">Total Orders</p>
-                  <p className="text-3xl font-bold text-gray-900">{orders.length}</p>
+                  <p className="text-3xl font-bold text-gray-900">{stats.total}</p>
                 </div>
                 <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
                   <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -229,9 +357,7 @@ export default function OrdersPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold text-gray-600 mb-1">Pending Orders</p>
-                  <p className="text-3xl font-bold text-gray-900">
-                    {orders.filter(o => ['placed', 'preparing'].includes(o.status)).length}
-                  </p>
+                  <p className="text-3xl font-bold text-gray-900">{stats.pending}</p>
                 </div>
                 <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
                   <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -245,9 +371,7 @@ export default function OrdersPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold text-gray-600 mb-1">Out for Delivery</p>
-                  <p className="text-3xl font-bold text-gray-900">
-                    {orders.filter(o => o.status === 'out_for_delivery').length}
-                  </p>
+                  <p className="text-3xl font-bold text-gray-900">{stats.outForDelivery}</p>
                 </div>
                 <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
                   <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -261,9 +385,7 @@ export default function OrdersPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold text-gray-600 mb-1">Delivered</p>
-                  <p className="text-3xl font-bold text-gray-900">
-                    {orders.filter(o => o.status === 'delivered').length}
-                  </p>
+                  <p className="text-3xl font-bold text-gray-900">{stats.delivered}</p>
                 </div>
                 <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
                   <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -281,7 +403,7 @@ export default function OrdersPage() {
                 <label className="block text-sm font-semibold text-gray-900 mb-2">Filter by Status</label>
                 <select
                   value={filter}
-                  onChange={(e) => setFilter(e.target.value)}
+                  onChange={handleFilterChange}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all text-gray-900"
                 >
                   <option value="all">All Orders</option>
@@ -296,7 +418,7 @@ export default function OrdersPage() {
                 <label className="block text-sm font-semibold text-gray-900 mb-2">Sort by</label>
                 <select
                   value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value as 'date' | 'amount' | 'status')}
+                  onChange={handleSortChange}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all text-gray-900"
                 >
                   <option value="date">Date (Newest First)</option>
@@ -342,7 +464,12 @@ export default function OrdersPage() {
                 </svg>
               </div>
               <h3 className="text-lg font-semibold text-gray-900 mb-2">No orders found</h3>
-              <p className="text-gray-500">Orders will appear here once customers start placing them</p>
+              <p className="text-gray-500">
+                {filter !== 'all' 
+                  ? `No orders found with status "${filter}"`
+                  : 'Orders will appear here once customers start placing them'
+                }
+              </p>
             </div>
           )}
 
@@ -397,13 +524,13 @@ export default function OrdersPage() {
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm">
                             <div className="font-semibold text-gray-900">
-                              #{order._id.slice(-8).toUpperCase()}
+                              #{order._id?.slice(-8)?.toUpperCase() || 'Unknown ID'}
                             </div>
                             <div className="text-gray-500">
                               {formatDate(order.createdAt)}
                             </div>
                             <div className="text-gray-900 font-medium text-sm mt-1">
-                              ₹{order.totalAmount.toLocaleString()}
+                              ₹{(order.totalAmount || 0).toLocaleString()}
                             </div>
                           </div>
                         </td>
@@ -411,31 +538,31 @@ export default function OrdersPage() {
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm">
                             <div className="font-semibold text-gray-900">
-                              {order.user.username}
+                              {order.user?.username || 'Unknown User'}
                             </div>
                             <div className="text-gray-500 text-sm">
-                              {order.user.email}
+                              {order.user?.email || 'No email'}
                             </div>
                             <div className="text-gray-500 text-xs mt-1 flex items-center gap-1">
                               <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                               </svg>
-                              {order.deliveryAddress.city}, {order.deliveryAddress.state}
+                              {order.deliveryAddress?.city || 'Unknown'}, {order.deliveryAddress?.state || 'Unknown'}
                             </div>
                           </div>
                         </td>
 
                         <td className="px-6 py-4">
                           <div className="text-sm">
-                            {order.items.slice(0, 2).map((item, index) => (
+                            {order.items?.slice(0, 2).map((item, index) => (
                               <div key={index} className="text-gray-900 font-medium">
-                                {item.quantity}x {item.product.name}
+                                {item?.quantity || 0}x {item?.product?.name || 'Unknown Product'}
                               </div>
-                            ))}
-                            {order.items.length > 2 && (
+                            )) || <div className="text-gray-500">No items</div>}
+                            {(order.items?.length || 0) > 2 && (
                               <div className="text-gray-500 text-xs">
-                                +{order.items.length - 2} more items
+                                +{(order.items?.length || 0) - 2} more items
                               </div>
                             )}
                           </div>
@@ -454,7 +581,8 @@ export default function OrdersPage() {
                                   value={order.paymentStatus}
                                   onChange={(e) => handlePaymentStatusUpdate(order._id, e.target.value)}
                                   onClick={(e) => e.stopPropagation()}
-                                  className={`text-xs font-medium px-2 py-1 rounded-full border border-gray-300 cursor-pointer ${
+                                  disabled={updatingPayment === order._id}
+                                  className={`text-xs font-medium px-2 py-1 rounded-full border border-gray-300 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${
                                     paymentStatusColors[order.paymentStatus]
                                   }`}
                                 >
@@ -477,7 +605,7 @@ export default function OrdersPage() {
                           <span className={`inline-flex px-3 py-1 text-xs font-medium rounded-full ${
                             statusColors[order.status]
                           }`}>
-                            {order.status.replace('_', ' ')}
+                            {order.status?.replace('_', ' ') || 'Unknown'}
                           </span>
                         </td>
 
@@ -486,7 +614,8 @@ export default function OrdersPage() {
                             value={order.status}
                             onChange={(e) => handleStatusUpdate(order._id, e.target.value)}
                             onClick={(e) => e.stopPropagation()}
-                            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all text-gray-900"
+                            disabled={updatingOrder === order._id}
+                            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all text-gray-900 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             <option value="placed">Placed</option>
                             <option value="preparing">Preparing</option>

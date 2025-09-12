@@ -2,7 +2,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import ProtectedRoute from '../../components/ProtectedRoute';
 import AdminLayout from '../../components/AdminLayout';
 import { useAdmin } from '../../context/AdminContext';
@@ -31,15 +30,18 @@ interface Feedback {
   createdAt: string;
 }
 
+type FilterType = 'all' | '1' | '2' | '3' | '4' | '5';
+type SortType = 'date' | 'rating' | 'product';
+
 export default function AdminFeedbackPage() {
   const { admin } = useAdmin();
-  const router = useRouter();
   const [feedbacks, setFeedbacks] = useState<Feedback[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [filter, setFilter] = useState<'all' | '1' | '2' | '3' | '4' | '5'>('all');
-  const [sortBy, setSortBy] = useState<'date' | 'rating' | 'product'>('date');
+  const [filter, setFilter] = useState<FilterType>('all');
+  const [sortBy, setSortBy] = useState<SortType>('date');
   const [searchTerm, setSearchTerm] = useState('');
+  const [imageErrors, setImageErrors] = useState<Set<string>>(new Set());
 
   const fetchFeedbacks = async () => {
     if (!admin?.token) {
@@ -66,26 +68,38 @@ export default function AdminFeedbackPage() {
 
       const data = await response.json();
       setFeedbacks(Array.isArray(data) ? data : []);
-    } catch (err: any) {
+    } catch (err) {
       console.error('Feedback fetch error:', err);
-      setError(err.message || 'Failed to fetch feedbacks');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch feedbacks';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchFeedbacks();
-  }, [admin]);
+    if (admin?.token) {
+      fetchFeedbacks();
+    }
+  }, [admin?.token]);
+
+  const handleImageError = (feedbackId: string) => {
+    setImageErrors(prev => new Set(prev).add(feedbackId));
+  };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString('en-IN', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    try {
+      return new Date(dateString).toLocaleString('en-IN', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch (error) {
+      console.error('Date formatting error:', error);
+      return 'Invalid date';
+    }
   };
 
   const renderStars = (rating: number, size: 'sm' | 'md' | 'lg' = 'md') => {
@@ -103,6 +117,7 @@ export default function AdminFeedbackPage() {
             className={`${sizeClasses[size]} ${star <= rating ? 'text-yellow-400' : 'text-gray-300'}`}
             fill="currentColor"
             viewBox="0 0 20 20"
+            aria-hidden="true"
           >
             <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
           </svg>
@@ -121,7 +136,9 @@ export default function AdminFeedbackPage() {
   const getRatingDistribution = () => {
     const distribution = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
     feedbacks.forEach(feedback => {
-      distribution[feedback.rating as keyof typeof distribution]++;
+      if (feedback.rating >= 1 && feedback.rating <= 5) {
+        distribution[feedback.rating as keyof typeof distribution]++;
+      }
     });
     return distribution;
   };
@@ -131,26 +148,44 @@ export default function AdminFeedbackPage() {
   // Filter and sort feedbacks
   const filteredFeedbacks = feedbacks
     .filter(feedback => {
-      const matchesRating = filter === 'all' || feedback.rating.toString() === filter;
-      const matchesSearch = searchTerm === '' || 
-        feedback.product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        feedback.user.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        feedback.comment?.toLowerCase().includes(searchTerm.toLowerCase());
-      
-      return matchesRating && matchesSearch;
+      try {
+        const matchesRating = filter === 'all' || feedback.rating.toString() === filter;
+        const matchesSearch = searchTerm === '' || 
+          feedback.product?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          feedback.user?.username?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          feedback.comment?.toLowerCase().includes(searchTerm.toLowerCase());
+        
+        return matchesRating && matchesSearch;
+      } catch (error) {
+        console.error('Filtering error:', error);
+        return false;
+      }
     })
     .sort((a, b) => {
-      switch (sortBy) {
-        case 'date':
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-        case 'rating':
-          return b.rating - a.rating;
-        case 'product':
-          return a.product.name.localeCompare(b.product.name);
-        default:
-          return 0;
+      try {
+        switch (sortBy) {
+          case 'date':
+            return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+          case 'rating':
+            return b.rating - a.rating;
+          case 'product':
+            return (a.product?.name || '').localeCompare(b.product?.name || '');
+          default:
+            return 0;
+        }
+      } catch (error) {
+        console.error('Sorting error:', error);
+        return 0;
       }
     });
+
+  const handleFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setFilter(e.target.value as FilterType);
+  };
+
+  const handleSortChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setSortBy(e.target.value as SortType);
+  };
 
   return (
     <ProtectedRoute>
@@ -164,12 +199,13 @@ export default function AdminFeedbackPage() {
             </div>
             <button
               onClick={fetchFeedbacks}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 hover:bg-gray-800 text-white rounded-lg font-semibold transition-colors"
+              disabled={loading}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 hover:bg-gray-800 disabled:bg-gray-400 disabled:cursor-not-allowed text-white rounded-lg font-semibold transition-colors"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
-              Refresh
+              {loading ? 'Loading...' : 'Refresh'}
             </button>
           </div>
 
@@ -278,7 +314,7 @@ export default function AdminFeedbackPage() {
                 <label className="block text-sm font-semibold text-gray-900 mb-2">Filter by Rating</label>
                 <select
                   value={filter}
-                  onChange={(e) => setFilter(e.target.value as any)}
+                  onChange={handleFilterChange}
                   className="w-full px-3 py-2 border border-gray-300 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all"
                 >
                   <option value="all">All Ratings</option>
@@ -293,7 +329,7 @@ export default function AdminFeedbackPage() {
                 <label className="block text-sm font-semibold text-gray-900 mb-2">Sort by</label>
                 <select
                   value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value as any)}
+                  onChange={handleSortChange}
                   className="w-full px-3 py-2 border border-gray-300 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all"
                 >
                   <option value="date">Date (Newest First)</option>
@@ -339,7 +375,12 @@ export default function AdminFeedbackPage() {
                 </svg>
               </div>
               <h3 className="text-lg font-semibold text-gray-900 mb-2">No feedback found</h3>
-              <p className="text-gray-500">Customer feedback will appear here once orders are delivered</p>
+              <p className="text-gray-500">
+                {searchTerm || filter !== 'all' 
+                  ? 'No feedback matches your current filters' 
+                  : 'Customer feedback will appear here once orders are delivered'
+                }
+              </p>
             </div>
           )}
 
@@ -352,11 +393,11 @@ export default function AdminFeedbackPage() {
                   <div className="flex items-start justify-between mb-4">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 bg-gray-900 rounded-full flex items-center justify-center text-white font-semibold">
-                        {feedback.user.username[0].toUpperCase()}
+                        {feedback.user?.username?.[0]?.toUpperCase() || 'U'}
                       </div>
                       <div>
-                        <h3 className="font-semibold text-gray-900">{feedback.user.username}</h3>
-                        <p className="text-sm text-gray-500">{feedback.user.email}</p>
+                        <h3 className="font-semibold text-gray-900">{feedback.user?.username || 'Unknown User'}</h3>
+                        <p className="text-sm text-gray-500">{feedback.user?.email || 'No email'}</p>
                       </div>
                     </div>
                     <div className="text-right">
@@ -367,18 +408,27 @@ export default function AdminFeedbackPage() {
 
                   {/* Product Info */}
                   <div className="flex items-center gap-3 mb-4 p-3 bg-gray-50 rounded-lg">
-                    <div className="w-12 h-12 relative rounded-lg overflow-hidden">
-                      <Image
-                        src={feedback.product.image}
-                        alt={feedback.product.name}
-                        fill
-                        className="object-cover"
-                        sizes="48px"
-                      />
+                    <div className="w-12 h-12 relative rounded-lg overflow-hidden bg-gray-200">
+                      {feedback.product?.image && !imageErrors.has(feedback._id) ? (
+                        <Image
+                          src={feedback.product.image}
+                          alt={feedback.product?.name || 'Product'}
+                          fill
+                          className="object-cover"
+                          sizes="48px"
+                          onError={() => handleImageError(feedback._id)}
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center bg-gray-200">
+                          <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                          </svg>
+                        </div>
+                      )}
                     </div>
                     <div>
-                      <h4 className="font-semibold text-gray-900">{feedback.product.name}</h4>
-                      {feedback.product.category && (
+                      <h4 className="font-semibold text-gray-900">{feedback.product?.name || 'Unknown Product'}</h4>
+                      {feedback.product?.category && (
                         <p className="text-sm text-gray-500">{feedback.product.category}</p>
                       )}
                     </div>
@@ -394,10 +444,10 @@ export default function AdminFeedbackPage() {
                   {/* Order Info */}
                   <div className="flex items-center justify-between pt-4 border-t border-gray-100 text-sm text-gray-500">
                     <div className="font-medium">
-                      Order #{feedback.order._id.slice(-8).toUpperCase()}
+                      Order #{feedback.order?._id?.slice(-8)?.toUpperCase() || 'Unknown'}
                     </div>
                     <div className="font-semibold">
-                      ₹{feedback.order.totalAmount.toLocaleString()}
+                      ₹{feedback.order?.totalAmount?.toLocaleString() || '0'}
                     </div>
                   </div>
                 </div>

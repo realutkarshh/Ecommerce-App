@@ -1,6 +1,7 @@
+// app/orders/[id]/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import ProtectedRoute from '../../../components/ProtectedRoute';
 import AdminLayout from '../../../components/AdminLayout';
@@ -40,6 +41,8 @@ interface Order {
   updatedAt?: string;
 }
 
+type StatusType = Order['status'];
+
 const statusColors = {
   placed: 'bg-blue-100 text-blue-800 border-blue-200',
   preparing: 'bg-yellow-100 text-yellow-800 border-yellow-200',
@@ -57,17 +60,25 @@ const statusIcons = {
 };
 
 export default function OrderDetailPage() {
-  const { id } = useParams();
+  const params = useParams();
   const router = useRouter();
   const { admin } = useAdmin();
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [imageErrors, setImageErrors] = useState<Set<string>>(new Set());
 
-  const fetchOrder = async () => {
+  // Safely extract id from params
+  const id = Array.isArray(params?.id) ? params.id[0] : params?.id;
+
+  const fetchOrder = useCallback(async () => {
     if (!admin?.token || !id) {
-      setError('Missing authentication or order ID');
+      setError(
+        !admin?.token 
+          ? 'Authentication required. Please log in again.' 
+          : 'Order ID is missing or invalid.'
+      );
       setLoading(false);
       return;
     }
@@ -84,35 +95,51 @@ export default function OrderDetailPage() {
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to fetch orders: ${response.status}`);
+        const errorText = await response.text();
+        throw new Error(`Failed to fetch orders: HTTP ${response.status} - ${errorText}`);
       }
 
       const orders = await response.json();
+      
+      if (!Array.isArray(orders)) {
+        throw new Error('Invalid response format: Expected array of orders');
+      }
+
       const foundOrder = orders.find((o: Order) => o._id === id);
       
       if (!foundOrder) {
-        throw new Error('Order not found');
+        throw new Error('Order not found. It may have been deleted or the ID is incorrect.');
       }
 
       setOrder(foundOrder);
-    } catch (err: any) {
+    } catch (err) {
       console.error('Order fetch error:', err);
-      setError(err.message || 'Failed to fetch order details');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch order details';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
-  };
+  }, [admin?.token, id]);
 
   useEffect(() => {
-    fetchOrder();
-  }, [admin, id]);
+    if (admin?.token && id) {
+      fetchOrder();
+    }
+  }, [fetchOrder]);
 
   const handleStatusUpdate = async (newStatus: string) => {
-    if (!admin?.token || !order) return;
+    if (!admin?.token || !order || !newStatus) return;
+
+    // Validate status
+    const validStatuses: StatusType[] = ['placed', 'preparing', 'prepared', 'out_for_delivery', 'delivered'];
+    if (!validStatuses.includes(newStatus as StatusType)) {
+      console.error('Invalid status:', newStatus);
+      return;
+    }
+
+    setUpdatingStatus(true);
 
     try {
-      setUpdatingStatus(true);
-
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000'}/orders/${order._id}`, {
         method: 'PATCH',
         headers: {
@@ -124,38 +151,109 @@ export default function OrderDetailPage() {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Failed to update status: ${errorText}`);
+        throw new Error(`Failed to update status: HTTP ${response.status} - ${errorText}`);
       }
 
       const updatedOrder = await response.json();
       setOrder(updatedOrder);
-    } catch (err: any) {
+
+      // Show success notification
+      const successDiv = document.createElement('div');
+      successDiv.className = 'fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg z-50';
+      successDiv.textContent = `Order status updated to ${newStatus.replace('_', ' ')}`;
+      document.body.appendChild(successDiv);
+      
+      setTimeout(() => {
+        if (document.body.contains(successDiv)) {
+          document.body.removeChild(successDiv);
+        }
+      }, 3000);
+
+    } catch (err) {
       console.error('Status update error:', err);
-      alert(`Failed to update order status: ${err.message}`);
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+      
+      // Show error notification
+      const errorDiv = document.createElement('div');
+      errorDiv.className = 'fixed top-4 right-4 bg-red-500 text-white px-4 py-2 rounded-lg shadow-lg z-50';
+      errorDiv.textContent = `Failed to update order status: ${errorMessage}`;
+      document.body.appendChild(errorDiv);
+      
+      setTimeout(() => {
+        if (document.body.contains(errorDiv)) {
+          document.body.removeChild(errorDiv);
+        }
+      }, 5000);
     } finally {
       setUpdatingStatus(false);
     }
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString('en-IN', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    });
+    try {
+      return new Date(dateString).toLocaleString('en-IN', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
+    } catch (error) {
+      console.error('Date formatting error:', error);
+      return 'Invalid date';
+    }
   };
 
   const calculateItemTotal = (price: number, quantity: number) => {
-    return price * quantity;
+    try {
+      return (price || 0) * (quantity || 0);
+    } catch (error) {
+      console.error('Item total calculation error:', error);
+      return 0;
+    }
   };
 
   const getStatusProgress = (status: string) => {
-    const statuses = ['placed', 'preparing', 'prepared', 'out_for_delivery', 'delivered'];
-    const currentIndex = statuses.indexOf(status);
-    return ((currentIndex + 1) / statuses.length) * 100;
+    try {
+      const statuses = ['placed', 'preparing', 'prepared', 'out_for_delivery', 'delivered'];
+      const currentIndex = statuses.indexOf(status);
+      return currentIndex >= 0 ? ((currentIndex + 1) / statuses.length) * 100 : 0;
+    } catch (error) {
+      console.error('Status progress calculation error:', error);
+      return 0;
+    }
+  };
+
+  const handleImageError = (productId: string) => {
+    setImageErrors(prev => new Set(prev).add(productId));
+  };
+
+  const calculateOrderSummary = () => {
+    try {
+      if (!order?.items) return { subtotal: 0, tax: 0, deliveryFee: 0 };
+      
+      const subtotal = order.items.reduce((sum, item) => {
+        return sum + calculateItemTotal(item?.product?.price || 0, item?.quantity || 0);
+      }, 0);
+      
+      const tax = Math.round((order.totalAmount || 0) * 0.05);
+      const deliveryFee = (order.totalAmount || 0) > 499 ? 0 : 50;
+      
+      return { subtotal, tax, deliveryFee };
+    } catch (error) {
+      console.error('Order summary calculation error:', error);
+      return { subtotal: 0, tax: 0, deliveryFee: 0 };
+    }
+  };
+
+  const handleGoBack = () => {
+    try {
+      router.back();
+    } catch (error) {
+      console.error('Navigation error:', error);
+      router.push('/orders');
+    }
   };
 
   if (loading) {
@@ -194,7 +292,7 @@ export default function OrderDetailPage() {
                   Try Again
                 </button>
                 <button
-                  onClick={() => router.back()}
+                  onClick={handleGoBack}
                   className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors"
                 >
                   Go Back
@@ -207,7 +305,27 @@ export default function OrderDetailPage() {
     );
   }
 
-  if (!order) return null;
+  if (!order) {
+    return (
+      <ProtectedRoute>
+        <AdminLayout>
+          <div className="flex items-center justify-center min-h-screen">
+            <div className="text-center">
+              <p className="text-gray-600">Order data not available</p>
+              <button
+                onClick={handleGoBack}
+                className="mt-4 px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors"
+              >
+                Go Back
+              </button>
+            </div>
+          </div>
+        </AdminLayout>
+      </ProtectedRoute>
+    );
+  }
+
+  const orderSummary = calculateOrderSummary();
 
   return (
     <ProtectedRoute>
@@ -217,8 +335,9 @@ export default function OrderDetailPage() {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
             <div className="flex items-center gap-4">
               <button
-                onClick={() => router.back()}
+                onClick={handleGoBack}
                 className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                aria-label="Go back"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -226,7 +345,7 @@ export default function OrderDetailPage() {
               </button>
               <div>
                 <h1 className="text-3xl font-bold text-gray-900">
-                  Order #{order._id.slice(-8).toUpperCase()}
+                  Order #{order._id?.slice(-8)?.toUpperCase() || 'Unknown ID'}
                 </h1>
                 <p className="text-gray-600">Placed on {formatDate(order.createdAt)}</p>
               </div>
@@ -234,7 +353,7 @@ export default function OrderDetailPage() {
             
             <div className="flex items-center gap-3">
               <span className={`px-4 py-2 rounded-lg font-medium border ${statusColors[order.status]}`}>
-                {statusIcons[order.status]} {order.status.replace('_', ' ').toUpperCase()}
+                {statusIcons[order.status]} {order.status?.replace('_', ' ')?.toUpperCase() || 'UNKNOWN'}
               </span>
             </div>
           </div>
@@ -250,7 +369,9 @@ export default function OrderDetailPage() {
                 <div className="relative mb-8">
                   <div className="flex items-center justify-between">
                     {['placed', 'preparing', 'prepared', 'out_for_delivery', 'delivered'].map((status, index) => {
-                      const isCompleted = ['placed', 'preparing', 'prepared', 'out_for_delivery', 'delivered'].indexOf(order.status) >= index;
+                      const statusArray = ['placed', 'preparing', 'prepared', 'out_for_delivery', 'delivered'];
+                      const currentStatusIndex = statusArray.indexOf(order.status);
+                      const isCompleted = currentStatusIndex >= index;
                       const isCurrent = order.status === status;
                       
                       return (
@@ -300,7 +421,7 @@ export default function OrderDetailPage() {
                       value={order.status}
                       onChange={(e) => handleStatusUpdate(e.target.value)}
                       disabled={updatingStatus}
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
                     >
                       <option value="placed">Placed</option>
                       <option value="preparing">Preparing</option>
@@ -322,36 +443,49 @@ export default function OrderDetailPage() {
                 <h2 className="text-xl font-semibold text-gray-900 mb-6">Order Items</h2>
                 
                 <div className="space-y-4">
-                  {order.items.map((item, index) => (
+                  {order.items?.length > 0 ? order.items.map((item, index) => (
                     <div key={index} className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
                       <div className="w-16 h-16 bg-white rounded-lg overflow-hidden flex-shrink-0">
-                        <Image
-                          src={item.product.image}
-                          alt={item.product.name}
-                          width={64}
-                          height={64}
-                          className="w-full h-full object-cover"
-                        />
+                        {item?.product?.image && !imageErrors.has(item.product._id) ? (
+                          <Image
+                            src={item.product.image}
+                            alt={item.product?.name || 'Product'}
+                            width={64}
+                            height={64}
+                            className="w-full h-full object-cover"
+                            onError={() => handleImageError(item.product._id)}
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center bg-gray-200">
+                            <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                          </div>
+                        )}
                       </div>
                       
                       <div className="flex-grow">
-                        <h3 className="font-semibold text-gray-900">{item.product.name}</h3>
+                        <h3 className="font-semibold text-gray-900">{item?.product?.name || 'Unknown Product'}</h3>
                         <p className="text-sm text-gray-600">
-                          {item.product.category && `Category: ${item.product.category}`}
+                          {item?.product?.category && `Category: ${item.product.category}`}
                         </p>
                         <p className="text-sm text-gray-600">
-                          ₹{item.product.price} × {item.quantity}
+                          ₹{item?.product?.price || 0} × {item?.quantity || 0}
                         </p>
                       </div>
                       
                       <div className="text-right">
                         <p className="text-lg font-bold text-gray-900">
-                          ₹{calculateItemTotal(item.product.price, item.quantity)}
+                          ₹{calculateItemTotal(item?.product?.price || 0, item?.quantity || 0).toLocaleString()}
                         </p>
-                        <p className="text-sm text-gray-500">Qty: {item.quantity}</p>
+                        <p className="text-sm text-gray-500">Qty: {item?.quantity || 0}</p>
                       </div>
                     </div>
-                  ))}
+                  )) : (
+                    <div className="text-center py-8 text-gray-500">
+                      No items found in this order
+                    </div>
+                  )}
                 </div>
 
                 {/* Order Summary */}
@@ -359,20 +493,20 @@ export default function OrderDetailPage() {
                   <div className="space-y-2">
                     <div className="flex justify-between text-gray-600">
                       <span>Subtotal</span>
-                      <span>₹{order.items.reduce((sum, item) => sum + (item.product.price * item.quantity), 0)}</span>
+                      <span>₹{orderSummary.subtotal.toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between text-gray-600">
                       <span>Tax (5%)</span>
-                      <span>₹{Math.round(order.totalAmount * 0.05)}</span>
+                      <span>₹{orderSummary.tax.toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between text-gray-600">
                       <span>Delivery Fee</span>
-                      <span>₹{order.totalAmount > 499 ? 0 : 50}</span>
+                      <span>₹{orderSummary.deliveryFee}</span>
                     </div>
                     <hr className="my-3" />
                     <div className="flex justify-between text-xl font-bold text-gray-900">
                       <span>Total Amount</span>
-                      <span>₹{order.totalAmount}</span>
+                      <span>₹{(order.totalAmount || 0).toLocaleString()}</span>
                     </div>
                   </div>
                 </div>
@@ -393,8 +527,8 @@ export default function OrderDetailPage() {
                       </svg>
                     </div>
                     <div>
-                      <p className="font-semibold text-gray-900">{order.user.username}</p>
-                      <p className="text-sm text-gray-600">{order.user.email}</p>
+                      <p className="font-semibold text-gray-900">{order.user?.username || 'Unknown User'}</p>
+                      <p className="text-sm text-gray-600">{order.user?.email || 'No email provided'}</p>
                     </div>
                   </div>
                   
@@ -406,9 +540,9 @@ export default function OrderDetailPage() {
                       Delivery Address
                     </h3>
                     <div className="text-sm text-gray-600 leading-relaxed bg-gray-50 p-3 rounded-lg">
-                      <p>{order.deliveryAddress.street}</p>
-                      <p>{order.deliveryAddress.city}, {order.deliveryAddress.state}</p>
-                      <p>PIN: {order.deliveryAddress.zip}</p>
+                      <p>{order.deliveryAddress?.street || 'Street not provided'}</p>
+                      <p>{order.deliveryAddress?.city || 'City not provided'}, {order.deliveryAddress?.state || 'State not provided'}</p>
+                      <p>PIN: {order.deliveryAddress?.zip || 'Not provided'}</p>
                     </div>
                   </div>
                 </div>
@@ -439,7 +573,7 @@ export default function OrderDetailPage() {
                         ? 'bg-red-100 text-red-800'
                         : 'bg-yellow-100 text-yellow-800'
                     }`}>
-                      {order.paymentStatus.charAt(0).toUpperCase() + order.paymentStatus.slice(1)}
+                      {order.paymentStatus?.charAt(0)?.toUpperCase() + order.paymentStatus?.slice(1) || 'Unknown'}
                     </span>
                   </div>
                   
@@ -472,18 +606,18 @@ export default function OrderDetailPage() {
                 <div className="space-y-3 text-sm">
                   <div className="flex justify-between">
                     <span className="text-gray-600">Order ID</span>
-                    <span className="font-mono">{order._id}</span>
+                    <span className="font-mono text-xs break-all">{order._id || 'Unknown'}</span>
                   </div>
                   
                   <div className="flex justify-between">
                     <span className="text-gray-600">Created</span>
-                    <span>{formatDate(order.createdAt)}</span>
+                    <span className="text-right">{formatDate(order.createdAt)}</span>
                   </div>
                   
                   {order.updatedAt && (
                     <div className="flex justify-between">
                       <span className="text-gray-600">Last Updated</span>
-                      <span>{formatDate(order.updatedAt)}</span>
+                      <span className="text-right">{formatDate(order.updatedAt)}</span>
                     </div>
                   )}
                 </div>
